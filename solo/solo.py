@@ -91,6 +91,10 @@ def main():
                         DoubletDepth) \
                         to provide a diversity of possible doublet depths.'
                         )
+    parser.add_argument('-i', dest='inter_only',
+                        default=None,
+                        help='Only generate doublets from distinct adata.obs[<inter_only].',
+                        type=str)
     args = parser.parse_args()
 
     if not args.normal_logging:
@@ -258,6 +262,9 @@ def main():
     ##################################################
     # simulate doublets
 
+    if args.inter_only:
+        assert args.inter_only in adata.obs
+
     non_zero_indexes = np.where(singlet_scvi_data.X > 0)
     cells = non_zero_indexes[0]
     genes = non_zero_indexes[1]
@@ -285,6 +292,10 @@ def main():
     for di in range(num_doublets):
         # sample two cells
         i, j = np.random.choice(singlet_num_cells, size=2)
+
+        if args.inter_only:
+            while adata.obs[args.inter_only][i] == adata.obs[args.inter_only][j]:
+                i, j = np.random.choice(singlet_num_cells, size=2)
 
         # generate doublets
         in_silico_doublets[di, :] = \
@@ -435,7 +446,7 @@ def main():
 
     np.save(os.path.join(args.out_dir, 'softmax_scores.npy'),
             solo_scores)
-    np.savetxt(os.path.join(args.out_dir, 'softmax_scores.csv'), 
+    np.savetxt(os.path.join(args.out_dir, 'softmax_scores.csv'),
                solo_scores, delimiter=",")
 
 
@@ -458,7 +469,7 @@ def main():
 
     np.save(os.path.join(args.out_dir, 'is_doublet.npy'), is_doublet[:num_cells])
     np.savetxt(os.path.join(args.out_dir, 'is_doublet.csv'), is_doublet[:num_cells], delimiter=",")
-    
+
     np.save(os.path.join(args.out_dir, 'is_doublet_sim.npy'), is_doublet[num_cells:])
 
     np.save(os.path.join(args.out_dir, 'preds.npy'), order_pred[:num_cells])
