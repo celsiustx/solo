@@ -1,9 +1,9 @@
 {
-    "n_hidden": 128,
-    "n_latent": 16,
-    "cl_hidden": 64,
-    "cl_layers": 1,
-    "dropout_rate": 0.1,
+    "n_hidden": 256,
+    "n_latent": 25,
+    "cl_hidden": 128,
+    "cl_layers": 2,
+    "dropout_rate": 0.2,
     "learning_rate": 0.001,
     "valid_pct": 0.10
 }
