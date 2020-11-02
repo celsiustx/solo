@@ -95,6 +95,10 @@ def main():
                         default=None,
                         help='Only generate doublets from distinct adata.obs[<inter_doublets>].',
                         type=str)
+    parser.add_argument('-b', dest='vae_both',
+                        default=False,
+                        action='store_true',
+                        help='Train VAE on both singlets & doublets (real & fake).'
     args = parser.parse_args()
 
     if not args.normal_logging:
@@ -191,74 +195,6 @@ def main():
         batch_size = int(np.round(1.25*batch_size))
         print('Increasing batch_size to %d to avoid single example batch.' % batch_size)
 
-    ##################################################
-    # VAE
-
-    vae = VAE(n_input=singlet_scvi_data.nb_genes, n_labels=2,
-              reconstruction_loss='nb',
-              log_variational=True, **vae_params)
-
-    if args.seed:
-        if args.gpu:
-            device = torch.device('cuda')
-            vae.load_state_dict(torch.load(os.path.join(args.seed, 'vae.pt')))
-            vae.to(device)
-        else:
-            map_loc = 'cpu'
-            vae.load_state_dict(torch.load(os.path.join(args.seed, 'vae.pt'),
-                                map_location=map_loc))
-
-        # save latent representation
-        utrainer = \
-            UnsupervisedTrainer(vae, singlet_scvi_data,
-                                train_size=(1. - valid_pct),
-                                frequency=2,
-                                metrics_to_monitor=['reconstruction_error'],
-                                use_cuda=args.gpu,
-                                early_stopping_kwargs=stopping_params,
-                                batch_size=batch_size)
-
-        full_posterior = utrainer.create_posterior(
-            utrainer.model,
-            singlet_scvi_data,
-            indices=np.arange(len(singlet_scvi_data)))
-        latent, _, _ = full_posterior.sequential(batch_size).get_latent()
-        np.save(os.path.join(args.out_dir, 'latent.npy'),
-                latent.astype('float32'))
-
-    else:
-        stopping_params['early_stopping_metric'] = 'reconstruction_error'
-        stopping_params['save_best_state_metric'] = 'reconstruction_error'
-
-        # initialize unsupervised trainer
-        utrainer = \
-            UnsupervisedTrainer(vae, singlet_scvi_data,
-                                train_size=(1. - valid_pct),
-                                frequency=2,
-                                metrics_to_monitor=['reconstruction_error'],
-                                use_cuda=args.gpu,
-                                early_stopping_kwargs=stopping_params,
-                                batch_size=batch_size)
-        utrainer.history['reconstruction_error_test_set'].append(0)
-        # initial epoch
-        utrainer.train(n_epochs=2000, lr=learning_rate)
-
-        # drop learning rate and continue
-        utrainer.early_stopping.wait = 0
-        utrainer.train(n_epochs=500, lr=0.5 * learning_rate)
-
-        # save VAE
-        torch.save(vae.state_dict(), os.path.join(args.out_dir, 'vae.pt'))
-
-        # save latent representation
-        full_posterior = utrainer.create_posterior(
-            utrainer.model,
-            singlet_scvi_data,
-            indices=np.arange(len(singlet_scvi_data)))
-        latent, _, _ = full_posterior.sequential(batch_size).get_latent()
-        np.save(os.path.join(args.out_dir, 'latent.npy'),
-                latent.astype('float32'))
-
 
     ##################################################
     # simulate doublets
@@ -329,6 +265,75 @@ def main():
 
     assert(len(np.unique(classifier_data.labels.flatten())) == 2)
 
+
+    ##################################################
+    # VAE
+
+    vae = VAE(n_input=singlet_scvi_data.nb_genes, n_labels=2,
+              reconstruction_loss='nb',
+              log_variational=True, **vae_params)
+
+    vae_data = classifier_data if args.vae_both else singlet_scvi_data
+    if args.seed:
+        if args.gpu:
+            device = torch.device('cuda')
+            vae.load_state_dict(torch.load(os.path.join(args.seed, 'vae.pt')))
+            vae.to(device)
+        else:
+            map_loc = 'cpu'
+            vae.load_state_dict(torch.load(os.path.join(args.seed, 'vae.pt'),
+                                map_location=map_loc))
+
+        # save latent representation
+        utrainer = \
+            UnsupervisedTrainer(vae, vae_data,
+                                train_size=(1. - valid_pct),
+                                frequency=2,
+                                metrics_to_monitor=['reconstruction_error'],
+                                use_cuda=args.gpu,
+                                early_stopping_kwargs=stopping_params,
+                                batch_size=batch_size)
+
+        full_posterior = utrainer.create_posterior(
+            utrainer.model,
+            vae_data,
+            indices=np.arange(len(vae_data)))
+        latent, _, _ = full_posterior.sequential(batch_size).get_latent()
+        np.save(os.path.join(args.out_dir, 'latent.npy'),
+                latent.astype('float32'))
+
+    else:
+        stopping_params['early_stopping_metric'] = 'reconstruction_error'
+        stopping_params['save_best_state_metric'] = 'reconstruction_error'
+
+        # initialize unsupervised trainer
+        utrainer = \
+            UnsupervisedTrainer(vae, vae_data,
+                                train_size=(1. - valid_pct),
+                                frequency=2,
+                                metrics_to_monitor=['reconstruction_error'],
+                                use_cuda=args.gpu,
+                                early_stopping_kwargs=stopping_params,
+                                batch_size=batch_size)
+        utrainer.history['reconstruction_error_test_set'].append(0)
+        # initial epoch
+        utrainer.train(n_epochs=2000, lr=learning_rate)
+
+        # drop learning rate and continue
+        utrainer.early_stopping.wait = 0
+        utrainer.train(n_epochs=500, lr=0.5 * learning_rate)
+
+        # save VAE
+        torch.save(vae.state_dict(), os.path.join(args.out_dir, 'vae.pt'))
+
+        # save latent representation
+        full_posterior = utrainer.create_posterior(
+            utrainer.model,
+            vae_data,
+            indices=np.arange(len(vae_data)))
+        latent, _, _ = full_posterior.sequential(batch_size).get_latent()
+        np.save(os.path.join(args.out_dir, 'latent.npy'),
+                latent.astype('float32'))
 
     ##################################################
     # classifier
