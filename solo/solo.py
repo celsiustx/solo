@@ -6,8 +6,8 @@ import shutil
 import anndata
 
 import numpy as np
+import scipy.sparse as sp
 from sklearn.metrics import roc_auc_score, roc_curve
-from scipy.sparse import issparse
 from collections import defaultdict
 
 import scvi
@@ -79,7 +79,7 @@ def main():
                         help='Experimentally expected number of doublets',
                         type=int, default=None)
     parser.add_argument('-p', dest='plot',
-                        default=False, action='store_true',
+                        default=True, action='store_true',
                         help='Plot outputs for solo')
     parser.add_argument('-l', dest='normal_logging',
                         default=False, action='store_true',
@@ -91,9 +91,9 @@ def main():
                         DoubletDepth) \
                         to provide a diversity of possible doublet depths.'
                         )
-    parser.add_argument('-i', dest='inter_only',
+    parser.add_argument('-i', dest='inter_doublets',
                         default=None,
-                        help='Only generate doublets from distinct adata.obs[<inter_only].',
+                        help='Only generate doublets from distinct adata.obs[<inter_doublets>].',
                         type=str)
     args = parser.parse_args()
 
@@ -118,8 +118,8 @@ def main():
         scvi_data = LoomDataset(data_path)
     elif data_ext == '.h5ad':
         adata = anndata.read(data_path)
-        if issparse(adata.X):
-            adata.X = adata.X.todense()
+        #if sp.issparse(adata.X):
+        #    adata.X = adata.X.todense()
         scvi_data = AnnDatasetFromAnnData(adata)
     elif os.path.isdir(data_path):
         scvi_data = Dataset10X(save_path=data_path,
@@ -259,13 +259,17 @@ def main():
         np.save(os.path.join(args.out_dir, 'latent.npy'),
                 latent.astype('float32'))
 
+
     ##################################################
     # simulate doublets
 
-    if args.inter_only:
-        assert args.inter_only in adata.obs
+    if args.inter_doublets:
+        assert args.inter_doublets in adata.obs
 
-    non_zero_indexes = np.where(singlet_scvi_data.X > 0)
+    if sp.issparse(singlet_scvi_data.X):
+        non_zero_indexes = singlet_scvi_data.X.nonzero()
+    else:
+        non_zero_indexes = np.where(singlet_scvi_data.X > 0)
     cells = non_zero_indexes[0]
     genes = non_zero_indexes[1]
     cells_ids = defaultdict(list)
@@ -287,35 +291,44 @@ def main():
         # make sure we are making a non negative amount of doublets
         assert num_doublets >= 0
 
-    in_silico_doublets = np.zeros((num_doublets, num_genes), dtype='float32')
+    in_silico_doublets = []
+
     # for desired # doublets
     for di in range(num_doublets):
         # sample two cells
         i, j = np.random.choice(singlet_num_cells, size=2)
 
-        if args.inter_only:
-            while adata.obs[args.inter_only][i] == adata.obs[args.inter_only][j]:
+        if args.inter_doublets:
+            while adata.obs[args.inter_doublets][i] == adata.obs[args.inter_doublets][j]:
                 i, j = np.random.choice(singlet_num_cells, size=2)
 
         # generate doublets
-        in_silico_doublets[di, :] = \
+        in_silico_doublets.append(
             doublet_function(singlet_scvi_data.X, i, j,
                              doublet_depth=args.doublet_depth,
                              cell_depths=cell_depths, cells_ids=cells_ids,
-                             randomize_doublet_size=args.randomize_doublet_size)
+                             randomize_doublet_size=args.randomize_doublet_size))
+
+    if sp.issparse(scvi_data.X):
+        in_silico_doublets = sp.vstack(in_silico_doublets)
+        train_data = sp.vstack([scvi_data.X, in_silico_doublets])
+    else:
+        in_silico_doublets = np.vstack(in_silico_doublets)
+        train_data = np.vstack([scvi_data.X, in_silico_doublets])
 
     # merge datasets
     # we can maybe up sample the known doublets
     # concatentate
     classifier_data = GeneExpressionDataset()
     classifier_data.populate_from_data(
-        X=np.vstack([scvi_data.X,
-                     in_silico_doublets]),
+        X=train_data,
         labels=np.hstack([np.ravel(scvi_data.labels),
                           np.ones(in_silico_doublets.shape[0])]),
+        gene_names=scvi_data.gene_names,
         remap_attributes=False)
 
     assert(len(np.unique(classifier_data.labels.flatten())) == 2)
+
 
     ##################################################
     # classifier
@@ -488,7 +501,7 @@ def main():
 
     if args.plot:
         import matplotlib
-        matplotlib.use('Agg')
+        #matplotlib.use('Agg')
         import matplotlib.pyplot as plt
         import seaborn as sns
         # plot ROC
@@ -498,7 +511,7 @@ def main():
         plt.gca().set_xlabel('False positive rate')
         plt.gca().set_ylabel('True positive rate')
         plt.legend()
-        plt.savefig(os.path.join(args.out_dir, 'roc.pdf'))
+        plt.savefig(os.path.join(args.out_dir, 'roc.png'))
         plt.close()
 
         # plot accuracy
@@ -509,7 +522,7 @@ def main():
         plt.gca().set_xlabel('Threshold')
         plt.gca().set_ylabel('Accuracy')
         plt.legend()
-        plt.savefig(os.path.join(args.out_dir, 'accuracy.pdf'))
+        plt.savefig(os.path.join(args.out_dir, 'accuracy.png'))
         plt.close()
 
         # plot distributions
@@ -517,13 +530,13 @@ def main():
         sns.distplot(test_score[test_y], label='Simulated')
         sns.distplot(test_score[~test_y], label='Observed')
         plt.legend()
-        plt.savefig(os.path.join(args.out_dir, 'train_v_test_dist.pdf'))
+        plt.savefig(os.path.join(args.out_dir, 'train_v_test_dist.png'))
         plt.close()
 
         plt.figure()
         sns.distplot(doublet_score[:num_cells], label='Observed')
         plt.legend()
-        plt.savefig(os.path.join(args.out_dir, 'real_cells_dist.pdf'))
+        plt.savefig(os.path.join(args.out_dir, 'real_cells_dist.png'))
         plt.close()
 
         scvi_umap = umap.UMAP(n_neighbors=16).fit_transform(latent)

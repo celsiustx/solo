@@ -1,6 +1,7 @@
 import numpy as np
 
 from scvi.dataset import GeneExpressionDataset
+from scipy.sparse import csr_matrix, issparse
 from scipy.stats import multinomial
 from sklearn.neighbors import NearestNeighbors
 
@@ -86,10 +87,10 @@ def create_average_doublet(X: np.ndarray,
       randomly chosen jth cell
     Returns
     -------
-    float64
+    float
         average expression vector of two cells
     '''
-    return (X[i, :] + X[j, :]).astype('float64') / 2
+    return X[i] + X[j] / 2
 
 
 def create_summed_doublet(X: np.ndarray,
@@ -107,10 +108,10 @@ def create_summed_doublet(X: np.ndarray,
       randomly chosen jth cell
     Returns
     -------
-    float64
+    float
         summed expression vector of two cells
     '''
-    return (X[i, :] + X[j, :]).astype('float64')
+    return X[i] + X[j]
 
 
 def create_multinomial_doublet(X: np.ndarray,
@@ -133,7 +134,7 @@ def create_multinomial_doublet(X: np.ndarray,
         cell_ids list of lists with genes with counts for each cell
     Returns
     -------
-    float64
+    float
         multinomial expression vector of two cells
     '''
     doublet_depth = kwargs["doublet_depth"]
@@ -142,15 +143,19 @@ def create_multinomial_doublet(X: np.ndarray,
     randomize_doublet_size = kwargs["randomize_doublet_size"]
 
     # add their counts
-    dp = (X[i, :]
-          + X[j, :]).astype('float64')
-    dp = np.ravel(dp)
+    dp = X[i] + X[j]
     non_zero_indexes = np.unique(cells_ids[i] + cells_ids[j])
+    if issparse(X):
+        dp = dp.data
+    else:
+        dp = np.ravel(dp)
+        dp = dp[non_zero_indexes]
+
     # a huge hack caused by
     # https://github.com/numpy/numpy/issues/8317
     # fun fun fun https://stackoverflow.com/questions/23257587/how-can-i-avoid-value-errors-when-using-numpy-random-multinomial
     # okay with this hack because affects pro
-    dp = dp[non_zero_indexes]
+
     # normalize
     dp /= dp.sum()
     if randomize_doublet_size:
@@ -164,7 +169,7 @@ def create_multinomial_doublet(X: np.ndarray,
     non_zero_probs = multinomial.rvs(n=dd, p=dp)
     probs = np.zeros(X.shape[1])
     probs[non_zero_indexes] = non_zero_probs
-    return probs
+    return csr_matrix(probs) if issparse(X) else probs
 
 
 def make_gene_expression_dataset(data: np.ndarray, gene_names: np.ndarray):
