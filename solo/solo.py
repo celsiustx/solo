@@ -72,9 +72,9 @@ def main():
                         indicates the cell is a doublet. No header.',
                         type=str)
     parser.add_argument('-t', dest='doublet_type', help='Please enter \
-                        multinomial, average, or sum',
+                        multinomial, average, sum, or mixed',
                         default='multinomial',
-                        choices=['multinomial', 'average', 'sum'])
+                        choices=['multinomial', 'average', 'sum', 'mixed'])
     parser.add_argument('-e', dest='expected_number_of_doublets',
                         help='Experimentally expected number of doublets',
                         type=int, default=None)
@@ -98,7 +98,7 @@ def main():
     parser.add_argument('-b', dest='vae_both',
                         default=False,
                         action='store_true',
-                        help='Train VAE on both singlets & doublets (real & fake).'
+                        help='Train VAE on both singlets & doublets (real & fake).')
     args = parser.parse_args()
 
     if not args.normal_logging:
@@ -238,6 +238,10 @@ def main():
             while adata.obs[args.inter_doublets][i] == adata.obs[args.inter_doublets][j]:
                 i, j = np.random.choice(singlet_num_cells, size=2)
 
+        if args.doublet_type == 'mixed':
+            in_silico_doublets = np.random.choice([create_average_doublet,
+                                                   create_summed_doublet,
+                                                   create_multinomial_doublet])
         # generate doublets
         in_silico_doublets.append(
             doublet_function(singlet_scvi_data.X, i, j,
