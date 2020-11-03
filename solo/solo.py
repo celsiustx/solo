@@ -239,9 +239,9 @@ def main():
                 i, j = np.random.choice(singlet_num_cells, size=2)
 
         if args.doublet_type == 'mixed':
-            in_silico_doublets = np.random.choice([create_average_doublet,
-                                                   create_summed_doublet,
-                                                   create_multinomial_doublet])
+            doublet_function = np.random.choice([create_average_doublet,
+                                                 create_summed_doublet,
+                                                 create_multinomial_doublet])
         # generate doublets
         in_silico_doublets.append(
             doublet_function(singlet_scvi_data.X, i, j,
